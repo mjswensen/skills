@@ -1,3 +1,3 @@
 # skills
 
-See https://www.skills.sh/packs
+[skills.sh/packs/mjswensen](https://www.skills.sh/packs/mjswensen)
