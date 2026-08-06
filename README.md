@@ -22,6 +22,10 @@ I'd like to try out and/or fine-tune these:
 - `npx skills add https://github.com/cloudflare/skills --skill durable-objects`
 - `npx skills add https://github.com/better-auth/better-icons --skill better-icons`
 
+### Rust
+
+- `npx skills add https://github.com/apollographql/skills --skill rust-best-practices`
+
 ## Skills I'd like to try out
 
 - Alternative to skills.sh: skillsmp.com
