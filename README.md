@@ -20,6 +20,7 @@ I'd like to try out and/or fine-tune these:
 - `npx skills add https://github.com/cloudflare/skills --skill workers-best-practices`
 - `npx skills add https://github.com/cloudflare/skills --skill wrangler`
 - `npx skills add https://github.com/cloudflare/skills --skill durable-objects`
+- `npx skills add https://github.com/better-auth/better-icons --skill better-icons`
 
 ## Skills I'd like to try out
 
