@@ -1,0 +1,5 @@
+{
+  "name": "skills",
+  "image": "ghcr.io/mjswensen/devcontainer:latest",
+  "remoteUser": "mjs"
+}
