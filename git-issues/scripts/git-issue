@@ -1,0 +1,363 @@
+#!/bin/sh
+set -eu
+
+ISSUES_BRANCH=issues
+ISSUES_DIR=.issues
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  git issue init
+  git issue new [title]
+  git issue list
+  git issue show <id>
+  git issue edit <id>
+  git issue save
+  git issue pull
+  git issue push
+USAGE
+}
+
+die() {
+  printf 'git issue: %s\n' "$*" >&2
+  exit 1
+}
+
+repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null || die 'not inside a Git repository'
+}
+
+issues_path() {
+  root=$(repo_root)
+  printf '%s/%s\n' "$root" "$ISSUES_DIR"
+}
+
+require_initialized() {
+  p=$(issues_path)
+  [ -d "$p" ] || die "not initialized; run 'git issue init'"
+  git -C "$p" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "$ISSUES_DIR is not a Git worktree"
+}
+
+add_local_exclude() {
+  root=$(repo_root)
+  exclude=$(git -C "$root" rev-parse --git-path info/exclude)
+  case "$exclude" in
+    /*) ;;
+    *) exclude="$root/$exclude" ;;
+  esac
+  mkdir -p "$(dirname "$exclude")"
+  touch "$exclude"
+  grep -Fqx "/$ISSUES_DIR/" "$exclude" 2>/dev/null || printf '/%s/\n' "$ISSUES_DIR" >> "$exclude"
+}
+
+create_orphan_branch() {
+  root=$(repo_root)
+  tree=$(git -C "$root" mktree </dev/null)
+  commit=$(printf '%s\n' 'Initialize issue tracker' | git -C "$root" commit-tree "$tree")
+  git -C "$root" update-ref "refs/heads/$ISSUES_BRANCH" "$commit"
+}
+
+cmd_init() {
+  root=$(repo_root)
+  target="$root/$ISSUES_DIR"
+
+  add_local_exclude
+
+  if [ -e "$target" ]; then
+    git -C "$target" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "$target already exists and is not a Git worktree"
+    branch=$(git -C "$target" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+    [ "$branch" = "$ISSUES_BRANCH" ] || die "$target exists but is not checked out on '$ISSUES_BRANCH'"
+    printf 'Issue worktree already initialized at %s\n' "$target"
+    return
+  fi
+
+  if ! git -C "$root" show-ref --verify --quiet "refs/heads/$ISSUES_BRANCH"; then
+    if git -C "$root" show-ref --verify --quiet "refs/remotes/origin/$ISSUES_BRANCH"; then
+      git -C "$root" branch --no-track "$ISSUES_BRANCH" "refs/remotes/origin/$ISSUES_BRANCH" >/dev/null
+    else
+      create_orphan_branch
+    fi
+  fi
+
+  git -C "$root" worktree add "$target" "$ISSUES_BRANCH" >/dev/null
+  printf 'Initialized Git issues at %s\n' "$target"
+}
+
+find_issue_file() {
+  id=$1
+  case "$id" in
+    ''|*[!0-9]*) die "invalid issue id: $id" ;;
+  esac
+  require_initialized
+  p=$(issues_path)
+  # Match zero-padded and unpadded forms by reading frontmatter IDs if needed.
+  found=''
+  for f in "$p"/*.md; do
+    [ -e "$f" ] || continue
+    file_id=$(awk 'BEGIN{infront=0} /^---[[:space:]]*$/{if(infront){exit}else{infront=1;next}} infront && /^id:[[:space:]]*[0-9]+[[:space:]]*$/{sub(/^id:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); print; exit}' "$f")
+    [ -n "$file_id" ] || continue
+    if [ "$file_id" -eq "$id" ] 2>/dev/null; then
+      [ -z "$found" ] || die "multiple issue files declare id $id"
+      found=$f
+    fi
+  done
+  [ -n "$found" ] || die "issue $id not found"
+  printf '%s\n' "$found"
+}
+
+issue_title() {
+  awk '/^#[[:space:]]+/{sub(/^#[[:space:]]+/, ""); print; exit}' "$1"
+}
+
+resolving_commit() {
+  id=$1
+  root=$(repo_root)
+  # Evaluate only commits reachable from the source worktree's current HEAD.
+  for sha in $(git -C "$root" rev-list HEAD); do
+    trailers=$(git -C "$root" show -s --format=%B "$sha" | git interpret-trailers --parse)
+    [ -n "$trailers" ] || continue
+    if printf '%s\n' "$trailers" | awk -v id="$id" '
+      BEGIN { found=0 }
+      {
+        pos=index($0, ":")
+        if (!pos) next
+        key=substr($0,1,pos-1)
+        val=substr($0,pos+1)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+        if (key != "Resolves") next
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
+        if (val !~ /^[1-9][0-9]*([[:space:]]*,[[:space:]]*[1-9][0-9]*)*$/) next
+        n=split(val, ids, /[[:space:]]*,[[:space:]]*/)
+        for (i=1; i<=n; i++) {
+          if ((ids[i] + 0) == (id + 0)) { found=1; exit }
+        }
+      }
+      END { exit(found ? 0 : 1) }
+    '; then
+      printf '%s\n' "$sha"
+      return 0
+    fi
+  done
+  return 1
+}
+
+status_for() {
+  id=$1
+  if resolving_commit "$id" >/dev/null 2>&1; then
+    printf 'closed\n'
+  else
+    printf 'open\n'
+  fi
+}
+
+next_id() {
+  require_initialized
+  p=$(issues_path)
+  max=0
+  for f in "$p"/*.md; do
+    [ -e "$f" ] || continue
+    id=$(awk 'BEGIN{infront=0} /^---[[:space:]]*$/{if(infront){exit}else{infront=1;next}} infront && /^id:[[:space:]]*[0-9]+[[:space:]]*$/{sub(/^id:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); print; exit}' "$f")
+    case "$id" in ''|*[!0-9]*) continue ;; esac
+    [ "$id" -gt "$max" ] && max=$id
+  done
+  printf '%s\n' $((max + 1))
+}
+
+slugify() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//; s/-$//'
+}
+
+editor_cmd() {
+  root=$(repo_root)
+  if [ -n "${GIT_EDITOR:-}" ]; then
+    printf '%s\n' "$GIT_EDITOR"
+    return 0
+  fi
+  editor=$(git -C "$root" config --get core.editor 2>/dev/null || true)
+  if [ -n "$editor" ]; then
+    printf '%s\n' "$editor"
+    return 0
+  fi
+  if [ -n "${VISUAL:-}" ]; then
+    printf '%s\n' "$VISUAL"
+    return 0
+  fi
+  if [ -n "${EDITOR:-}" ]; then
+    printf '%s\n' "$EDITOR"
+    return 0
+  fi
+  return 1
+}
+
+open_editor() {
+  file=$1
+  if ! editor=$(editor_cmd); then
+    rel=${file#"$(repo_root)/"}
+    cat >&2 <<EOF
+No editor is explicitly configured.
+
+Open this file with your preferred editor:
+
+  $rel
+
+Or configure Git's editor, for example:
+
+  git config --global core.editor "code --wait"
+EOF
+    return 1
+  fi
+  # Editor commands may intentionally contain arguments, matching Git's convention.
+  sh -c "$editor \"\$1\"" sh "$file"
+}
+
+cmd_new() {
+  require_initialized
+  title=${*:-}
+  if [ -z "$title" ]; then
+    printf 'Title: ' >&2
+    IFS= read -r title
+  fi
+  [ -n "$title" ] || die 'title cannot be empty'
+
+  id=$(next_id)
+  slug=$(slugify "$title")
+  [ -n "$slug" ] || slug=issue
+  padded=$(printf '%04d' "$id")
+  p=$(issues_path)
+  file="$p/$padded-$slug.md"
+  [ ! -e "$file" ] || die "issue file already exists: $file"
+  created=$(date +%Y-%m-%d)
+
+  cat > "$file" <<EOF_ISSUE
+---
+id: $id
+created: $created
+---
+
+# $title
+
+## Description
+
+
+## Acceptance criteria
+
+- [ ]
+EOF_ISSUE
+
+  rel=${file#"$(repo_root)/"}
+  printf 'Created issue %s:\n  %s\n\nEdit the issue, then run:\n\n  git issue save\n' "$id" "$rel"
+}
+
+cmd_edit() {
+  [ $# -eq 1 ] || die 'usage: git issue edit <id>'
+  file=$(find_issue_file "$1")
+  if open_editor "$file"; then
+    printf '\nSave issue changes with:\n\n  git issue save\n'
+  else
+    return 1
+  fi
+}
+
+issue_ids_from_staged() {
+  p=$(issues_path)
+  git -C "$p" diff --cached --name-only -- '*.md' | while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    file="$p/$rel"
+    if [ -f "$file" ]; then
+      id=$(awk 'BEGIN{infront=0} /^---[[:space:]]*$/{if(infront){exit}else{infront=1;next}} infront && /^id:[[:space:]]*[0-9]+[[:space:]]*$/{sub(/^id:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); print; exit}' "$file")
+    else
+      id=$(git -C "$p" show "HEAD:$rel" 2>/dev/null | awk 'BEGIN{infront=0} /^---[[:space:]]*$/{if(infront){exit}else{infront=1;next}} infront && /^id:[[:space:]]*[0-9]+[[:space:]]*$/{sub(/^id:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); print; exit}' || true)
+    fi
+    case "$id" in ''|*[!0-9]*) ;; *) printf '%s\n' "$id" ;; esac
+  done | sort -n -u
+}
+
+cmd_save() {
+  [ $# -eq 0 ] || die 'usage: git issue save'
+  require_initialized
+  p=$(issues_path)
+  git -C "$p" add -A -- .
+
+  if git -C "$p" diff --cached --quiet; then
+    printf 'No issue changes to save.\n'
+    return 0
+  fi
+
+  ids=$(issue_ids_from_staged | awk 'BEGIN{first=1} {if(!first) printf ", "; printf "%s", $0; first=0} END{if(!first) printf "\n"}')
+  if [ -n "$ids" ]; then
+    message="Save issue changes $ids"
+  else
+    message='Save issue changes'
+  fi
+
+  git -C "$p" commit -m "$message" >/dev/null
+  printf 'Saved issue changes%s\n' "${ids:+ ($ids)}"
+}
+
+cmd_show() {
+  [ $# -eq 1 ] || die 'usage: git issue show <id>'
+  file=$(find_issue_file "$1")
+  if sha=$(resolving_commit "$1" 2>/dev/null); then
+    printf 'Issue %s — closed (%s)\n\n' "$1" "$(printf '%.12s' "$sha")"
+  else
+    printf 'Issue %s — open\n\n' "$1"
+  fi
+  cat "$file"
+}
+
+cmd_list() {
+  [ $# -eq 0 ] || die 'usage: git issue list'
+  require_initialized
+  p=$(issues_path)
+  any=0
+  for f in "$p"/*.md; do
+    [ -e "$f" ] || continue
+    id=$(awk 'BEGIN{infront=0} /^---[[:space:]]*$/{if(infront){exit}else{infront=1;next}} infront && /^id:[[:space:]]*[0-9]+[[:space:]]*$/{sub(/^id:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); print; exit}' "$f")
+    [ -n "$id" ] || continue
+    title=$(issue_title "$f")
+    status=$(status_for "$id")
+    printf '%-6s %-6s %s\n' "$id" "$status" "$title"
+    any=1
+  done
+  [ "$any" -eq 1 ] || printf 'No issues.\n'
+}
+
+require_origin() {
+  root=$(repo_root)
+  git -C "$root" remote get-url origin >/dev/null 2>&1 || die "remote 'origin' is not configured"
+}
+
+cmd_pull() {
+  [ $# -eq 0 ] || die 'usage: git issue pull'
+  require_initialized
+  require_origin
+  p=$(issues_path)
+  git -C "$p" diff --quiet && git -C "$p" diff --cached --quiet || die 'issue worktree has uncommitted changes'
+  git -C "$p" fetch origin "refs/heads/$ISSUES_BRANCH"
+  git -C "$p" merge --ff-only FETCH_HEAD
+}
+
+cmd_push() {
+  [ $# -eq 0 ] || die 'usage: git issue push'
+  require_initialized
+  require_origin
+  p=$(issues_path)
+  git -C "$p" push origin "HEAD:refs/heads/$ISSUES_BRANCH"
+}
+
+cmd=${1:-}
+[ -n "$cmd" ] || { usage; exit 1; }
+shift
+
+case "$cmd" in
+  init)  [ $# -eq 0 ] || die 'usage: git issue init'; cmd_init ;;
+  new)   cmd_new "$@" ;;
+  list)  cmd_list "$@" ;;
+  show)  cmd_show "$@" ;;
+  edit)  cmd_edit "$@" ;;
+  save)  cmd_save "$@" ;;
+  pull)  cmd_pull "$@" ;;
+  push)  cmd_push "$@" ;;
+  -h|--help|help) usage ;;
+  *) usage >&2; die "unknown command: $cmd" ;;
+esac
