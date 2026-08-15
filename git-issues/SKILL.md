@@ -1,6 +1,6 @@
 ---
 name: git-issues
-description: Manage lightweight, Git-native issues stored as Markdown on an orphan `issues` branch and exposed through a `.issues/` worktree. Use when creating, reading, editing, listing, pushing, pulling, or implementing repository issues, or when commits should reference/close issues using Git trailers such as `Refs: 42` and `Resolves: 42`.
+description: "Manage lightweight, Git-native issues stored as Markdown on an orphan `issues` branch and exposed through a `.issues/` worktree. Use when creating, reading, editing, listing, pushing, pulling, or implementing repository issues, or when commits should reference/close issues using Git trailers such as `Refs: 42` and `Resolves: 42`."
 compatibility: Requires Git, a POSIX shell, and an editor. No issue service, database, or runtime dependency is required.
 ---
 
