@@ -150,6 +150,30 @@ status_for() {
   fi
 }
 
+resolved_issue_ids() {
+  root=$(repo_root)
+  # Walk the source history once and emit every issue ID found in a resolving
+  # trailer. The list command uses this as a memoized status lookup.
+  for sha in $(git -C "$root" rev-list HEAD); do
+    trailers=$(git -C "$root" show -s --format=%B "$sha" | git interpret-trailers --parse)
+    [ -n "$trailers" ] || continue
+    printf '%s\n' "$trailers" | awk '
+      {
+        pos=index($0, ":")
+        if (!pos) next
+        key=substr($0,1,pos-1)
+        val=substr($0,pos+1)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+        if (key != "Resolves") next
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
+        if (val !~ /^[1-9][0-9]*([[:space:]]*,[[:space:]]*[1-9][0-9]*)*$/) next
+        n=split(val, ids, /[[:space:]]*,[[:space:]]*/)
+        for (i=1; i<=n; i++) print ids[i] + 0
+      }
+    '
+  done
+}
+
 next_id() {
   require_initialized
   p=$(issues_path)
@@ -309,13 +333,20 @@ cmd_list() {
   [ $# -eq 0 ] || die 'usage: git issue list'
   require_initialized
   p=$(issues_path)
+  # Status is derived from history, so calculate the resolving IDs once for
+  # the whole list rather than once for every issue.
+  resolved_ids=$(resolved_issue_ids | awk '!seen[$0]++ {printf "%s ", $0}')
   any=0
   for f in "$p"/*.md; do
     [ -e "$f" ] || continue
     id=$(awk 'BEGIN{infront=0} /^---[[:space:]]*$/{if(infront){exit}else{infront=1;next}} infront && /^id:[[:space:]]*[0-9]+[[:space:]]*$/{sub(/^id:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); print; exit}' "$f")
     [ -n "$id" ] || continue
     title=$(issue_title "$f")
-    status=$(status_for "$id")
+    status_id=$(printf '%s\n' "$id" | awk '{print $1 + 0}')
+    case " $resolved_ids" in
+      *" $status_id "*) status=closed ;;
+      *) status=open ;;
+    esac
     printf '%-6s %-6s %s\n' "$id" "$status" "$title"
     any=1
   done
