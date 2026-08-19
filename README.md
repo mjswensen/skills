@@ -12,6 +12,7 @@ I'd like to try out and/or fine-tune these:
 
 - `npx skills add https://github.com/github/awesome-copilot --skill conventional-commit`
 - `npx skills add https://github.com/juliusbrussee/caveman --skill caveman-commit`
+- https://github.com/AminBlg/SimpleEnglish
 
 ## Personal projects (Svelte + Cloudflare)
 
