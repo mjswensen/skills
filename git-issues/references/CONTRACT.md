@@ -42,12 +42,17 @@ The issue's frontmatter contains its immutable numeric ID:
 ---
 id: 42
 created: 2026-08-11
+depends-on:
+  - 12
+  - 19
 ---
 
 # Add dark mode
 
 Describe the problem, desired outcome, context, and acceptance criteria here.
 ```
+
+The optional `depends-on` key is the canonical way to declare issue dependencies. Its value is a YAML sequence of positive integer issue IDs. Each referenced issue blocks the issue containing the key. For example, issue 42 above may be worked after issues 12 and 19. An issue with no dependencies may omit the key or use `depends-on: []`. The inline form `depends-on: [12, 19]` is equivalent. Dependencies must reference existing issues, and dependency cycles are invalid.
 
 Additional frontmatter such as `priority` or `labels` is allowed. `status` is reserved and must not be stored because status is derived.
 
@@ -70,6 +75,8 @@ git issue save
 `git issue save` stages all changes in the issue worktree and creates one ordinary Git commit on the `issues` branch. Multiple created, modified, renamed, or deleted issue documents may be saved together.
 
 Agents do not need editor integration. They may modify `.issues/*.md` directly and then run `git issue save`.
+
+`git issue list` prints every issue in topological dependency order: blocking issues precede issues that depend on them. When multiple issues are currently unblocked, the lower ID comes first. Each output line contains a marker, issue ID, derived status, and title. The marker is 🟢 for open or 🟣 for closed; ⛔ replaces the status marker when one or more blockers remain open. If dependencies exist, their comma-separated IDs follow the title in parentheses, each prefixed by its own status marker, as in `(🟣 1,🟢 2)`. No dependency suffix is printed otherwise. Output contains no ANSI color escapes. Missing dependencies or cycles are reported as errors rather than producing a misleading order.
 
 ## Status semantics
 

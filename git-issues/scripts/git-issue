@@ -23,6 +23,28 @@ die() {
   exit 1
 }
 
+make_temp_dir() {
+  temp_parent=${TMPDIR:-/tmp}
+  # Ensure a relative TMPDIR cannot be interpreted as an option by mkdir.
+  case "$temp_parent" in
+    /*|./*|../*) ;;
+    *) temp_parent="./$temp_parent" ;;
+  esac
+
+  temp_base="$temp_parent/git-issue.$$"
+  temp_attempt=0
+  while [ "$temp_attempt" -lt 100 ]; do
+    temp_dir="$temp_base.$temp_attempt"
+    # mkdir is atomic, so a competing process can only make this attempt fail.
+    if (umask 077 && mkdir "$temp_dir") 2>/dev/null; then
+      printf '%s\n' "$temp_dir"
+      return 0
+    fi
+    temp_attempt=$((temp_attempt + 1))
+  done
+  return 1
+}
+
 repo_root() {
   git rev-parse --show-toplevel 2>/dev/null || die 'not inside a Git repository'
 }
@@ -256,6 +278,7 @@ cmd_new() {
 ---
 id: $id
 created: $created
+depends-on: []
 ---
 
 # $title
@@ -329,28 +352,162 @@ cmd_show() {
   cat "$file"
 }
 
+issue_dependencies() {
+  # Parse the documented YAML forms: `depends-on: [1, 2]` and a block list.
+  # Keeping the accepted grammar narrow makes malformed dependency data fail
+  # loudly instead of silently producing an unsafe work order.
+  awk '
+    function emit_id(value) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      if (value !~ /^[1-9][0-9]*$/) bad=1
+      else print value + 0
+    }
+    BEGIN { infront=0; inlist=0; seen=0; items=0; bad=0 }
+    /^---[[:space:]]*$/ {
+      if (!infront) { infront=1; next }
+      if (inlist && !items) bad=1
+      exit bad
+    }
+    infront {
+      line=$0
+      if (inlist) {
+        if (line ~ /^[[:space:]]*$/) next
+        if (line ~ /^[[:space:]]*-[[:space:]]*/) {
+          sub(/^[[:space:]]*-[[:space:]]*/, "", line)
+          emit_id(line); items=1; next
+        }
+        if (line ~ /^[^[:space:]][^:]*:/) {
+          if (!items) bad=1
+          inlist=0
+        } else {
+          bad=1; next
+        }
+      }
+      if (line ~ /^depends-on[[:space:]]*:/) {
+        if (seen) { bad=1; next }
+        seen=1
+        sub(/^depends-on[[:space:]]*:[[:space:]]*/, "", line)
+        if (line == "[]") next
+        if (line == "") { inlist=1; items=0; next }
+        if (line !~ /^\[[^][]+\]$/) { bad=1; next }
+        sub(/^\[/, "", line); sub(/\]$/, "", line)
+        count=split(line, values, ",")
+        for (i=1; i<=count; i++) emit_id(values[i])
+      }
+    }
+    END { if (bad) exit 1 }
+  ' "$1"
+}
+
 cmd_list() {
   [ $# -eq 0 ] || die 'usage: git issue list'
   require_initialized
   p=$(issues_path)
-  # Status is derived from history, so calculate the resolving IDs once for
-  # the whole list rather than once for every issue.
-  resolved_ids=$(resolved_issue_ids | awk '!seen[$0]++ {printf "%s ", $0}')
+  tmp=$(make_temp_dir) || die 'could not create temporary directory'
+  trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+  : > "$tmp/nodes"
+  : > "$tmp/edges"
+
   any=0
   for f in "$p"/*.md; do
     [ -e "$f" ] || continue
     id=$(awk 'BEGIN{infront=0} /^---[[:space:]]*$/{if(infront){exit}else{infront=1;next}} infront && /^id:[[:space:]]*[0-9]+[[:space:]]*$/{sub(/^id:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); print; exit}' "$f")
-    [ -n "$id" ] || continue
-    title=$(issue_title "$f")
-    status_id=$(printf '%s\n' "$id" | awk '{print $1 + 0}')
-    case " $resolved_ids" in
-      *" $status_id "*) status=closed ;;
-      *) status=open ;;
-    esac
-    printf '%-6s %-6s %s\n' "$id" "$status" "$title"
+    case "$id" in ''|*[!0-9]*) die "invalid or missing id in ${f#$p/}" ;; esac
+    id=$(printf '%s\n' "$id" | awk '{print $1 + 0}')
+    [ "$id" -gt 0 ] || die "invalid issue id in ${f#$p/}"
+    grep -Fxq "$id" "$tmp/nodes" && die "multiple issue files declare id $id"
+    printf '%s\n' "$id" >> "$tmp/nodes"
+    printf '%s\n' "$f" > "$tmp/file-$id"
+    if ! dependencies=$(issue_dependencies "$f"); then
+      die "invalid depends-on value in ${f#$p/}"
+    fi
+    for dependency in $dependencies; do
+      printf '%s %s\n' "$id" "$dependency" >> "$tmp/edges"
+    done
     any=1
   done
-  [ "$any" -eq 1 ] || printf 'No issues.\n'
+
+  if [ "$any" -eq 0 ]; then
+    printf 'No issues.\n'
+    rm -rf "$tmp"
+    trap - EXIT HUP INT TERM
+    return
+  fi
+
+  sort -n -u "$tmp/nodes" -o "$tmp/nodes"
+  # Kahn-style topological sort. Among currently unblocked issues, choose the
+  # smallest ID so output remains deterministic.
+  if ! awk '
+    FNR==NR { node[$1]=1; order[++count]=$1; next }
+    {
+      if (!node[$2]) {
+        printf "git issue: issue %s depends on missing issue %s\n", $1, $2 > "/dev/stderr"
+        bad=1
+      }
+      dependency[$1 SUBSEP $2]=1
+    }
+    END {
+      if (bad) exit 1
+      for (step=1; step<=count; step++) {
+        chosen=0
+        for (i=1; i<=count; i++) {
+          candidate=order[i]
+          if (done[candidate]) continue
+          blocked=0
+          for (edge in dependency) {
+            split(edge, pair, SUBSEP)
+            if (pair[1] == candidate && !done[pair[2]]) { blocked=1; break }
+          }
+          if (!blocked) { chosen=candidate; break }
+        }
+        if (!chosen) {
+          print "git issue: dependency cycle detected" > "/dev/stderr"
+          exit 1
+        }
+        print chosen
+        done[chosen]=1
+      }
+    }
+  ' "$tmp/nodes" "$tmp/edges" > "$tmp/order"; then
+    exit 1
+  fi
+
+  resolved_ids=$(resolved_issue_ids | awk '!seen[$0]++ {printf "%s ", $0}')
+  while IFS= read -r id; do
+    IFS= read -r file < "$tmp/file-$id"
+    title=$(issue_title "$file")
+    case " $resolved_ids" in
+      *" $id "*) status=closed ;;
+      *) status=open ;;
+    esac
+
+    blockers=''
+    has_open_blocker=0
+    for dependency in $(awk -v id="$id" '$1 == id { print $2 }' "$tmp/edges"); do
+      case " $resolved_ids" in
+        *" $dependency "*) dependency_circle='🟣' ;;
+        *) dependency_circle='🟢'; has_open_blocker=1 ;;
+      esac
+      [ -z "$blockers" ] || blockers="$blockers,"
+      blockers="${blockers}${dependency_circle} ${dependency}"
+    done
+
+    suffix=''
+    [ -z "$blockers" ] || suffix=" ($blockers)"
+    if [ "$has_open_blocker" -eq 1 ]; then
+      issue_marker='⛔'
+    else
+      case "$status" in
+        open) issue_marker='🟢' ;;
+        closed) issue_marker='🟣' ;;
+      esac
+    fi
+    printf '%s %-4s %-7s %s%s\n' \
+      "$issue_marker" "$id" "$status" "$title" "$suffix"
+  done < "$tmp/order"
+
+  rm -rf "$tmp"
+  trap - EXIT HUP INT TERM
 }
 
 require_origin() {

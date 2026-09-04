@@ -8,6 +8,7 @@ A generic Agent Skill for keeping project issues as Markdown in Git, without an 
 - Exposes that branch locally at `.issues/` as a linked Git worktree.
 - Derives issue status entirely from commit history reachable from the current `HEAD`.
 - Uses `Refs: N` and `Resolves: N` Git trailers as the source/issue relationship contract.
+- Records dependencies with `depends-on: [N, ...]` frontmatter and can list blockers first.
 - Synchronizes the issue branch through ordinary Git remotes.
 - Requires no issue database or hosted service.
 
@@ -39,7 +40,7 @@ Then Git automatically resolves `git issue ...` to the `git-issue` executable:
 ```sh
 git issue init
 git issue new "Add dark mode"
-git issue list
+git issue list  # dependency order, with blocker status at a glance
 git issue show 1
 ```
 

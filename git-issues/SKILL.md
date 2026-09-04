@@ -48,6 +48,8 @@ git issue push
 
 `git issue list` and `git issue show` derive status from the current source worktree's `HEAD`; they do not write status into issue files.
 
+`git issue list` displays issues in dependency order, with blockers before their dependents and numeric ID as the tie-breaker. Each line includes a marker, issue ID, status, and title. The marker is 🟢 for open or 🟣 for closed, but ⛔ replaces it when at least one blocker remains open. Dependencies follow the title as comma-separated IDs in parentheses, each prefixed by its own 🟢 or 🟣 status marker (for example, `(🟣 1,🟢 2)`). Issues without dependencies have no dependency suffix. The command rejects missing dependency targets and cycles.
+
 `git issue pull` and `git issue push` synchronize only the `issues` branch with the `origin` remote.
 
 ## Working an issue
@@ -83,6 +85,22 @@ Keep trailers in the commit trailer block at the end of the commit message so Gi
 ## Editing issues
 
 Issue files are ordinary Markdown. Edit them directly when useful, including through the user's editor of choice. Preserve the issue `id` once created. Do not add a `status` field.
+
+Declare blockers as positive issue IDs using YAML frontmatter. Use an empty list when there are none:
+
+```yaml
+depends-on: []
+```
+
+For one or more blockers, either block or inline YAML sequence syntax is canonical:
+
+```yaml
+depends-on:
+  - 12
+  - 19
+```
+
+Do not create dependency cycles or refer to nonexistent issues.
 
 If the helper is unavailable but `.issues/` already exists, agents may read and edit `.issues/*.md` directly and commit those edits from the `.issues/` worktree with ordinary Git commands.
 
