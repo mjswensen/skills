@@ -1,5 +1,5 @@
 {
   "name": "skills",
-  "image": "ghcr.io/mjswensen/devcontainer:latest",
+  "image": "ghcr.io/mjswensen/devcontainer:sha-82adcff",
   "remoteUser": "mjs"
 }
