@@ -35,6 +35,7 @@ I'd like to try out and/or fine-tune these:
 
 - `npx skills add https://github.com/mattpocock/skills --skill teach`
 - https://gist.github.com/geoffreylitt/a29df1b5f9865506e8952488eac3d524
+- `npx skills add https://github.com/humanlayer/skills --skill show-me`
 
 ### Creative
 
