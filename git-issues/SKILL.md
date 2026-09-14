@@ -31,6 +31,8 @@ Prefer the helper when available:
 git issue init
 git issue new "Add dark mode"
 git issue list
+# Include closed issues:
+git issue list --all
 git issue show 42
 git issue edit 42
 git issue save
@@ -48,7 +50,7 @@ git issue push
 
 `git issue list` and `git issue show` derive status from the current source worktree's `HEAD`; they do not write status into issue files.
 
-`git issue list` displays issues in dependency order, with blockers before their dependents and numeric ID as the tie-breaker. Each line includes a marker, issue ID, status, and title. The marker is 🟢 for open or 🟣 for closed, but ⛔ replaces it when at least one blocker remains open. Dependencies follow the title as comma-separated IDs in parentheses, each prefixed by its own 🟢 or 🟣 status marker (for example, `(🟣 1,🟢 2)`). Issues without dependencies have no dependency suffix. The command rejects missing dependency targets and cycles.
+`git issue list` displays open issues by default in dependency order, with blockers before their dependents and numeric ID as the tie-breaker. Pass `git issue list --all` to include closed issues. Each line includes a marker, issue ID, status, and title. The marker is 🟢 for open or 🟣 for closed, but ⛔ replaces it when at least one blocker remains open. Dependencies follow the title as comma-separated IDs in parentheses, each prefixed by its own 🟢 or 🟣 status marker (for example, `(🟣 1,🟢 2)`). Issues without dependencies have no dependency suffix. The command rejects missing dependency targets and cycles.
 
 `git issue pull` and `git issue push` synchronize only the `issues` branch with the `origin` remote.
 

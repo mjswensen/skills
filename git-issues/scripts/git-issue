@@ -9,7 +9,7 @@ usage() {
 Usage:
   git issue init
   git issue new [title]
-  git issue list
+  git issue list [--all]
   git issue show <id>
   git issue edit <id>
   git issue save
@@ -400,7 +400,13 @@ issue_dependencies() {
 }
 
 cmd_list() {
-  [ $# -eq 0 ] || die 'usage: git issue list'
+  show_all=0
+  case "${1:-}" in
+    '') ;;
+    --all) show_all=1; shift ;;
+    *) die 'usage: git issue list [--all]' ;;
+  esac
+  [ $# -eq 0 ] || die 'usage: git issue list [--all]'
   require_initialized
   p=$(issues_path)
   tmp=$(make_temp_dir) || die 'could not create temporary directory'
@@ -473,6 +479,7 @@ cmd_list() {
   fi
 
   resolved_ids=$(resolved_issue_ids | awk '!seen[$0]++ {printf "%s ", $0}')
+  displayed=0
   while IFS= read -r id; do
     IFS= read -r file < "$tmp/file-$id"
     title=$(issue_title "$file")
@@ -480,6 +487,10 @@ cmd_list() {
       *" $id "*) status=closed ;;
       *) status=open ;;
     esac
+    if [ "$show_all" -eq 0 ] && [ "$status" = closed ]; then
+      continue
+    fi
+    displayed=1
 
     blockers=''
     has_open_blocker=0
@@ -506,6 +517,9 @@ cmd_list() {
       "$issue_marker" "$id" "$status" "$title" "$suffix"
   done < "$tmp/order"
 
+  if [ "$displayed" -eq 0 ]; then
+    printf 'No open issues. Run `git issue list --all` to display all issues.\n'
+  fi
   rm -rf "$tmp"
   trap - EXIT HUP INT TERM
 }

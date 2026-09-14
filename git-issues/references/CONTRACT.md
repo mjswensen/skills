@@ -76,7 +76,7 @@ git issue save
 
 Agents do not need editor integration. They may modify `.issues/*.md` directly and then run `git issue save`.
 
-`git issue list` prints every issue in topological dependency order: blocking issues precede issues that depend on them. When multiple issues are currently unblocked, the lower ID comes first. Each output line contains a marker, issue ID, derived status, and title. The marker is 🟢 for open or 🟣 for closed; ⛔ replaces the status marker when one or more blockers remain open. If dependencies exist, their comma-separated IDs follow the title in parentheses, each prefixed by its own status marker, as in `(🟣 1,🟢 2)`. No dependency suffix is printed otherwise. Output contains no ANSI color escapes. Missing dependencies or cycles are reported as errors rather than producing a misleading order.
+`git issue list` prints open issues by default in topological dependency order: blocking issues precede issues that depend on them. Pass `git issue list --all` to include closed issues. When multiple issues are currently unblocked, the lower ID comes first. Each output line contains a marker, issue ID, derived status, and title. The marker is 🟢 for open or 🟣 for closed; ⛔ replaces the status marker when one or more blockers remain open. If dependencies exist, their comma-separated IDs follow the title in parentheses, each prefixed by its own status marker, as in `(🟣 1,🟢 2)`. No dependency suffix is printed otherwise. Output contains no ANSI color escapes. Missing dependencies or cycles are reported as errors rather than producing a misleading order.
 
 ## Status semantics
 

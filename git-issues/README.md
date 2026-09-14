@@ -40,7 +40,8 @@ Then Git automatically resolves `git issue ...` to the `git-issue` executable:
 ```sh
 git issue init
 git issue new "Add dark mode"
-git issue list  # dependency order, with blocker status at a glance
+git issue list  # open issues in dependency order
+# Include closed issues with: git issue list --all
 git issue show 1
 ```
 
