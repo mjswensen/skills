@@ -1,6 +1,6 @@
 ---
 name: review-guide
-description: A brief description of what this skill does
+description: Generate an interactive, self-contained HTML guide that explains a set of code changes (working tree, commit, branch diff, or pull request). Use when the user wants help understanding changes before reviewing them.
 ---
 
 # review-guide
