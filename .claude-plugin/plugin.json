@@ -2,12 +2,12 @@
   "name": "matt-swensen-skills",
   "description": "Development and productivity skills by Matt Swensen",
   "skills": [
-    "./skills/commit-message",
-    "./skills/git-issues",
-    "./skills/pr-cleanup",
-    "./skills/quick-win",
-    "./skills/review-art",
-    "./skills/review-guide",
-    "./skills/smoke-test"
+    "./commit-message",
+    "./git-issues",
+    "./pr-cleanup",
+    "./quick-win",
+    "./review-art",
+    "./review-guide",
+    "./smoke-test"
   ]
 }
