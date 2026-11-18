@@ -4,6 +4,7 @@
   "skills": [
     "./commit-message",
     "./git-issues",
+    "./implicit-state-machines",
     "./pr-cleanup",
     "./quick-win",
     "./review-art",
